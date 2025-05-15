@@ -2,6 +2,10 @@
 name = "pdf_modify"
 version = "0.1.0"
 edition = "2024"
+default-run = "pdf_modify"
 
 [dependencies]
-lopdf = "0.34.0"
+anyhow = "1.0.98"
+hex = "0.4.3"
+lopdf = "0.34"
+openssl = "0.10.72"
