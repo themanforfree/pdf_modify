@@ -4,7 +4,7 @@ use pdf_modify::{PDFSignManager, SignerInfo};
 
 fn main() -> Result<()> {
     let pdf_path = "files/hello_world.pdf";
-    let cert_path = "files/user.p12";
+    let cert_path = "certs/mycert.p12";
     let output_path = "output/signed.pdf";
     let mut signer = PDFSignManager::load(pdf_path, cert_path)?;
     let signer_info = SignerInfo::builder()
