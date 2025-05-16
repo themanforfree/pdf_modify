@@ -2,7 +2,12 @@ use std::io::Write;
 
 pub use self::sign_info::SignerInfo;
 use anyhow::Result;
-use lopdf::{IncrementalDocument, Object, ObjectId, StringFormat, dictionary, xobject};
+use image::load_and_split_png;
+use lopdf::{
+    IncrementalDocument, Object, ObjectId, Stream, StringFormat,
+    content::{Content, Operation},
+    dictionary,
+};
 
 use crate::{
     config::SIG_CONTENTS_PLACEHOLDER_LEN,
@@ -11,6 +16,7 @@ use crate::{
     utils::{AcroForm, Page},
 };
 
+pub(crate) mod image;
 pub(crate) mod sign_info;
 
 pub struct PDFSignManager {
@@ -70,22 +76,23 @@ impl PDFSignManager {
         self.doc.new_document.add_object(sig_dict)
     }
 
-    fn add_sig_annot_obj(&mut self, sig_id: ObjectId, page_id: ObjectId) -> ObjectId {
-        let boundingbox = vec![0.0, 0.0, 0.0, 0.0];
-        let matrix = vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
-        let ap_stream = xobject::form(boundingbox, matrix, vec![]);
-        let ap_id = self.doc.new_document.add_object(ap_stream);
+    fn add_sig_annot_obj(
+        &mut self,
+        ap_normal_id: ObjectId,
+        sig_id: ObjectId,
+        page_id: ObjectId,
+    ) -> ObjectId {
         let sig_annot = dictionary! {
             "Type" => "Annot",
             "Subtype" => "Widget",
             "FT" => "Sig",
-            "Rect" => vec![0, 0, 0, 0].into_iter().map(Object::Integer).collect::<Vec<_>>(),
+            "Rect" => vec![0, 0, 300, 300].into_iter().map(Object::Integer).collect::<Vec<_>>(),
             "T" => Object::string_literal("Signature1"),
             "V" => sig_id,
             "F" => 4,
             "P" => page_id,
             "AP" => dictionary! {
-                "N" => ap_id,
+                "N" => ap_normal_id,
             },
         };
         self.doc.new_document.add_object(sig_annot)
@@ -132,9 +139,49 @@ impl PDFSignManager {
         Ok(Page::new(page))
     }
 
+    fn add_ap_normal(&mut self) -> Result<ObjectId> {
+        let (mut rgb, alpha, width, height) = load_and_split_png("files/seal.png")?;
+        let alpha_id = self.doc.new_document.add_object(alpha);
+        rgb.dict.set("SMask", alpha_id);
+        let img_id = self.doc.new_document.add_object(rgb);
+        let ap_n_dict = dictionary!(
+            "Type" => "XObject",
+            "Subtype" => "Form",
+            "FormType" => 1,
+            "BBox" => vec![0, 0, width as i64, height as i64]
+                .into_iter()
+                .map(Object::Integer)
+                .collect::<Vec<_>>(),
+            "Resources" => dictionary! { "XObject" => dictionary! { "Image" => img_id } },
+        );
+        let ap_n_content = Content {
+            operations: vec![
+                Operation::new("q", vec![]),
+                Operation::new(
+                    "cm",
+                    vec![
+                        width.into(),
+                        0.into(),
+                        0.into(),
+                        height.into(),
+                        0.into(),
+                        0.into(),
+                        // position.0.into(),
+                        // position.1.into(),
+                    ],
+                ),
+                Operation::new("Do", vec!["Image".into()]),
+                Operation::new("Q", vec![]),
+            ],
+        };
+        let ap_n_stream = Stream::new(ap_n_dict, ap_n_content.encode()?);
+        Ok(self.doc.new_document.add_object(ap_n_stream))
+    }
+
     fn add_placeholder(&mut self, page_id: ObjectId, signer_info: SignerInfo) -> Result<()> {
         let sig_id = self.add_sig_obj(signer_info);
-        let sig_annot_id = self.add_sig_annot_obj(sig_id, page_id);
+        let ap_normal_id = self.add_ap_normal()?;
+        let sig_annot_id = self.add_sig_annot_obj(ap_normal_id, sig_id, page_id);
         let mut page = self.get_page_mut(page_id)?;
         let annots = page.get_or_create_annots_mut()?;
         annots.push(sig_annot_id.into());
