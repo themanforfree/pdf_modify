@@ -1,6 +1,7 @@
+use std::{fs::File, io::Read, process::Command};
+
 use anyhow::Result;
 use lopdf::{Document, Object};
-use std::{fs::File, io::Read, process::Command};
 
 fn main() -> Result<()> {
     let path = std::env::args().nth(1).unwrap();

@@ -2,8 +2,9 @@
 //! Parse the raw PDF data and replace the placeholder with the signed data.
 use std::io::Write;
 
-use crate::{byte_range::ByteRange, config::SIG_CONTENTS_PLACEHOLDER_LEN, signer::Sign};
 use anyhow::Result;
+
+use crate::{byte_range::ByteRange, config::SIG_CONTENTS_PLACEHOLDER_LEN, signer::Sign};
 
 pub(crate) struct RawPdf {
     data: Vec<u8>,

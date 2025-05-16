@@ -1,6 +1,5 @@
 use std::io::Write;
 
-pub use self::sign_info::SignerInfo;
 use anyhow::Result;
 use image::load_and_split_png;
 use lopdf::{
@@ -9,6 +8,7 @@ use lopdf::{
     dictionary,
 };
 
+pub use self::sign_info::SignerInfo;
 use crate::{
     config::SIG_CONTENTS_PLACEHOLDER_LEN,
     parser::RawPdf,

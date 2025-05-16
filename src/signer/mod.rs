@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-pub use p12::P12Signer;
+pub use self::p12::P12Signer;
 
 mod p12;
 
