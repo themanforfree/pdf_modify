@@ -4,7 +4,7 @@ use anyhow::Result;
 use image::GenericImageView;
 use lopdf::{Stream, dictionary};
 
-pub(crate) fn load_and_split_png(path: impl AsRef<Path>) -> Result<(Stream, Stream, u32, u32)> {
+pub(crate) fn load_and_split_png(path: impl AsRef<Path>) -> Result<(Stream, Stream)> {
     let mut buffer = Vec::new();
     let mut file = File::open(path)?;
     file.read_to_end(&mut buffer)?;
@@ -41,5 +41,5 @@ pub(crate) fn load_and_split_png(path: impl AsRef<Path>) -> Result<(Stream, Stre
         rgb_data,
     );
     rgb_stream.compress()?;
-    Ok((rgb_stream, alpha_stream, width, height))
+    Ok((rgb_stream, alpha_stream))
 }

@@ -10,7 +10,7 @@ use lopdf::{
 
 pub use self::sign_info::SignerInfo;
 use crate::{
-    config::SIG_CONTENTS_PLACEHOLDER_LEN,
+    config::{SEAL_POS, SEAL_SIZE, SIG_CONTENTS_PLACEHOLDER_LEN},
     parser::RawPdf,
     signer::{P12Signer, Sign},
     utils::{AcroForm, Page},
@@ -82,11 +82,17 @@ impl PDFSignManager {
         sig_id: ObjectId,
         page_id: ObjectId,
     ) -> ObjectId {
+        let rect = vec![
+            SEAL_POS.0.into(),
+            SEAL_POS.1.into(),
+            (SEAL_POS.0 + SEAL_SIZE.0).into(),
+            (SEAL_POS.1 + SEAL_SIZE.1).into(),
+        ];
         let sig_annot = dictionary! {
             "Type" => "Annot",
             "Subtype" => "Widget",
             "FT" => "Sig",
-            "Rect" => vec![0, 0, 300, 300].into_iter().map(Object::Integer).collect::<Vec<_>>(),
+            "Rect" => rect,
             "T" => Object::string_literal("Signature1"),
             "V" => sig_id,
             "F" => 4,
@@ -140,7 +146,7 @@ impl PDFSignManager {
     }
 
     fn add_ap_normal(&mut self) -> Result<ObjectId> {
-        let (mut rgb, alpha, width, height) = load_and_split_png("files/seal.png")?;
+        let (mut rgb, alpha) = load_and_split_png("files/seal.png")?;
         let alpha_id = self.doc.new_document.add_object(alpha);
         rgb.dict.set("SMask", alpha_id);
         let img_id = self.doc.new_document.add_object(rgb);
@@ -148,7 +154,7 @@ impl PDFSignManager {
             "Type" => "XObject",
             "Subtype" => "Form",
             "FormType" => 1,
-            "BBox" => vec![0, 0, width as i64, height as i64]
+            "BBox" => vec![0, 0, SEAL_SIZE.0, SEAL_SIZE.1]
                 .into_iter()
                 .map(Object::Integer)
                 .collect::<Vec<_>>(),
@@ -160,14 +166,12 @@ impl PDFSignManager {
                 Operation::new(
                     "cm",
                     vec![
-                        width.into(),
+                        SEAL_SIZE.0.into(),
                         0.into(),
                         0.into(),
-                        height.into(),
+                        SEAL_SIZE.1.into(),
                         0.into(),
                         0.into(),
-                        // position.0.into(),
-                        // position.1.into(),
                     ],
                 ),
                 Operation::new("Do", vec!["Image".into()]),
