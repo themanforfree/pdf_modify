@@ -5,24 +5,24 @@ use std::io::Write;
 use crate::{byte_range::ByteRange, config::SIG_CONTENTS_PLACEHOLDER_LEN, signer::Sign};
 use anyhow::Result;
 
-pub struct RawPdf {
+pub(crate) struct RawPdf {
     data: Vec<u8>,
     byte_range: ByteRange,
 }
 
 impl RawPdf {
-    pub fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         RawPdf {
             data: Vec::new(),
             byte_range: ByteRange::default(),
         }
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 
-    pub fn load_data(&mut self, data: Vec<u8>) -> Result<()> {
+    pub(crate) fn load_data(&mut self, data: Vec<u8>) -> Result<()> {
         self.data = data;
         self.byte_range = ByteRange::from_bytes(&self.data)?;
         let bytes = self.byte_range.get_bytes();
@@ -58,15 +58,8 @@ impl RawPdf {
     }
 
     #[inline]
-    pub fn save_to<W: Write>(&mut self, target: &mut W) -> Result<()> {
+    pub(crate) fn save_to<W: Write>(&mut self, target: &mut W) -> Result<()> {
         target.write_all(&self.data)?;
-        Ok(())
-    }
-
-    #[inline]
-    pub fn save(&mut self, path: &str) -> Result<()> {
-        let mut file = std::fs::File::create(path)?;
-        self.save_to(&mut file)?;
         Ok(())
     }
 }

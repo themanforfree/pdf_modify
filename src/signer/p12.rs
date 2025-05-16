@@ -1,13 +1,13 @@
+use std::path::Path;
+
 use anyhow::Result;
 use openssl::{
     cms::{CMSOptions, CmsContentInfo},
     pkcs12::{ParsedPkcs12_2, Pkcs12},
 };
-use std::path::Path;
 
-pub trait Sign {
-    fn sign(&self, data: &[u8]) -> Result<Vec<u8>>;
-}
+use super::Sign;
+
 pub struct P12Signer {
     pkcs12: ParsedPkcs12_2,
 }

@@ -1,11 +1,17 @@
+use std::io::Write;
+
+pub use self::sign_info::SignerInfo;
 use anyhow::Result;
-use lopdf::{Dictionary, IncrementalDocument, Object, ObjectId, StringFormat, dictionary, xobject};
+use lopdf::{IncrementalDocument, Object, ObjectId, StringFormat, dictionary, xobject};
 
 use crate::{
     config::SIG_CONTENTS_PLACEHOLDER_LEN,
     parser::RawPdf,
     signer::{P12Signer, Sign},
+    utils::{AcroForm, Page},
 };
+
+pub(crate) mod sign_info;
 
 pub struct PDFSignManager {
     doc: IncrementalDocument,
@@ -62,7 +68,6 @@ impl PDFSignManager {
             sig_dict.set("M", Object::string_literal(date));
         }
         self.doc.new_document.add_object(sig_dict)
-        // .add_object(Stream::new(sig_dict, vec![]))
     }
 
     fn add_sig_annot_obj(&mut self, sig_id: ObjectId, page_id: ObjectId) -> ObjectId {
@@ -118,13 +123,13 @@ impl PDFSignManager {
             }
         };
         let acro_form = self.doc.new_document.get_dictionary_mut(acro_id)?;
-        Ok(AcroForm { dict: acro_form })
+        Ok(AcroForm::new(acro_form))
     }
 
     fn get_page_mut(&mut self, page_id: ObjectId) -> Result<Page> {
         self.doc.opt_clone_object_to_new_document(page_id)?;
         let page = self.doc.new_document.get_dictionary_mut(page_id)?;
-        Ok(Page { dict: page })
+        Ok(Page::new(page))
     }
 
     fn add_placeholder(&mut self, page_id: ObjectId, signer_info: SignerInfo) -> Result<()> {
@@ -164,92 +169,20 @@ impl PDFSignManager {
         Ok(())
     }
 
-    // #[inline]
-    // pub fn save_to<W: Write>(&mut self, target: &mut W) -> Result<()> {
-    //     if !self.raw_pdf.is_empty() {
-    //         self.raw_pdf.save_to(target)?;
-    //     } else {
-    //         self.doc.save_to(target)?;
-    //     }
-    //     Ok(())
-    // }
+    #[inline]
+    pub fn save_to<W: Write>(&mut self, target: &mut W) -> Result<()> {
+        if !self.raw_pdf.is_empty() {
+            self.raw_pdf.save_to(target)?;
+        } else {
+            self.doc.save_to(target)?;
+        }
+        Ok(())
+    }
 
     #[inline]
     pub fn save(&mut self, path: &str) -> Result<()> {
-        // let mut file = std::fs::File::create(path)?;
-        // self.save_to(&mut file)?;
-        self.raw_pdf.save(path)?;
+        let mut file = std::fs::File::create(path)?;
+        self.save_to(&mut file)?;
         Ok(())
-    }
-}
-
-struct Page<'a> {
-    dict: &'a mut Dictionary,
-}
-
-impl Page<'_> {
-    fn get_or_create_annots_mut(&mut self) -> Result<&mut Vec<Object>> {
-        self.dict
-            .as_hashmap_mut()
-            .entry(b"Annots".into())
-            .or_insert_with(|| Object::Array(vec![]))
-            .as_array_mut()
-            .map_err(Into::into)
-    }
-}
-
-struct AcroForm<'a> {
-    dict: &'a mut Dictionary,
-}
-
-impl AcroForm<'_> {
-    fn get_fields_mut(&mut self) -> Result<&mut Vec<Object>> {
-        self.dict
-            .get_mut(b"Fields")
-            .and_then(Object::as_array_mut)
-            .map_err(Into::into)
-    }
-
-    pub fn set<K, V>(&mut self, key: K, value: V)
-    where
-        K: Into<Vec<u8>>,
-        V: Into<Object>,
-    {
-        self.dict.set(key, value);
-    }
-}
-
-pub struct SignerInfo {
-    name: Option<String>,
-    reason: Option<String>,
-    contact_info: Option<String>,
-    location: Option<String>,
-    date: Option<String>,
-}
-
-impl SignerInfo {
-    pub fn new(
-        name: impl Into<String>,
-        reason: impl Into<String>,
-        contact_info: impl Into<String>,
-        location: impl Into<String>,
-        date: impl Into<String>,
-    ) -> Self {
-        SignerInfo {
-            name: Some(name.into()),
-            reason: Some(reason.into()),
-            contact_info: Some(contact_info.into()),
-            location: Some(location.into()),
-            date: Some(date.into()),
-        }
-    }
-    pub fn empty() -> Self {
-        SignerInfo {
-            name: None,
-            reason: None,
-            contact_info: None,
-            location: None,
-            date: None,
-        }
     }
 }
