@@ -1,19 +1,19 @@
 use std::io::Write;
 
 use anyhow::Result;
-use image::load_and_split_png;
 use lopdf::{
     IncrementalDocument, Object, ObjectId, Stream, StringFormat,
     content::{Content, Operation},
     dictionary,
 };
 
+use self::image::ImageHelper;
 pub use self::sign_info::SignerInfo;
 use crate::{
     config::{SEAL_POS, SEAL_SIZE, SIG_CONTENTS_PLACEHOLDER_LEN},
     parser::RawPdf,
     signer::{P12Signer, Sign},
-    utils::{AcroForm, Page},
+    utils::{AcroForm, Page, PageMut},
 };
 
 pub(crate) mod image;
@@ -139,14 +139,80 @@ impl PDFSignManager {
         Ok(AcroForm::new(acro_form))
     }
 
-    fn get_page_mut(&mut self, page_id: ObjectId) -> Result<Page> {
+    fn get_page_mut(&mut self, page_id: ObjectId) -> Result<PageMut> {
         self.doc.opt_clone_object_to_new_document(page_id)?;
         let page = self.doc.new_document.get_dictionary_mut(page_id)?;
+        Ok(PageMut::new(page))
+    }
+
+    fn get_page(&self, page_id: ObjectId) -> Result<Page> {
+        let page = self.doc.get_prev_documents().get_dictionary(page_id)?;
         Ok(Page::new(page))
     }
 
+    fn add_image_to_page(
+        &mut self,
+        page_id: ObjectId,
+        mut rgb: Stream,
+        alpha: Stream,
+        pos: (f32, f32),
+        size: (f32, f32),
+    ) -> Result<()> {
+        let alpha_id = self.doc.new_document.add_object(alpha);
+        rgb.dict.set("SMask", alpha_id);
+        let img_id = self.doc.new_document.add_object(rgb);
+        let img_name = format!("X{}", img_id.0);
+        self.doc.add_xobject(page_id, img_name.as_bytes(), img_id)?;
+
+        let matrix = vec![
+            size.0.into(),
+            0.into(),
+            0.into(),
+            size.1.into(),
+            pos.0.into(),
+            pos.1.into(),
+        ];
+        let content = Content {
+            operations: vec![
+                Operation::new("q", vec![]),
+                Operation::new("cm", matrix),
+                Operation::new("Do", vec![img_name.into()]),
+                Operation::new("Q", vec![]),
+            ],
+        };
+        self.doc
+            .new_document
+            .add_to_page_content(page_id, content)?;
+        Ok(())
+    }
+
+    fn add_cross_page_seal(&mut self) -> Result<()> {
+        let page_ids: Vec<ObjectId> = self.doc.get_prev_documents().page_iter().collect();
+        let page_ids_len = page_ids.len();
+        let mut image_helper = ImageHelper::load_and_split("files/seal.png", page_ids_len)?;
+
+        for (i, page_id) in page_ids.into_iter().enumerate() {
+            let (rgb, alpha) = image_helper.get_img_pair(Some(i))?;
+
+            // Calculate the position of the seal
+            let page_size = self
+                .get_page(page_id)?
+                .get_box()?
+                .into_iter()
+                .map(|n| n as f32)
+                .collect::<Vec<_>>();
+            let height_center = (page_size[1] + page_size[3]) / 2.0;
+            let size = (SEAL_SIZE.0 as f32 / page_ids_len as f32, SEAL_SIZE.1 as f32);
+            let pos = (page_size[2] - size.0, height_center - size.1 / 2.0);
+
+            self.add_image_to_page(page_id, rgb, alpha, pos, size)?;
+        }
+        Ok(())
+    }
+
     fn add_ap_normal(&mut self) -> Result<ObjectId> {
-        let (mut rgb, alpha) = load_and_split_png("files/seal.png")?;
+        let mut image_helper = ImageHelper::load("files/seal.png")?;
+        let (mut rgb, alpha) = image_helper.get_img_pair(None)?;
         let alpha_id = self.doc.new_document.add_object(alpha);
         rgb.dict.set("SMask", alpha_id);
         let img_id = self.doc.new_document.add_object(rgb);
@@ -183,6 +249,7 @@ impl PDFSignManager {
     }
 
     fn add_placeholder(&mut self, page_id: ObjectId, signer_info: SignerInfo) -> Result<()> {
+        self.add_cross_page_seal()?;
         let sig_id = self.add_sig_obj(signer_info);
         let ap_normal_id = self.add_ap_normal()?;
         let sig_annot_id = self.add_sig_annot_obj(ap_normal_id, sig_id, page_id);
@@ -201,7 +268,7 @@ impl PDFSignManager {
             .doc
             .get_prev_documents()
             .page_iter()
-            .next()
+            .last()
             .ok_or_else(|| anyhow::anyhow!("No pages found in the document"))?;
         self.doc.opt_clone_object_to_new_document(page_id)?;
         Ok(page_id)

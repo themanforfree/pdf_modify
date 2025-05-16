@@ -2,12 +2,32 @@ use anyhow::Result;
 use lopdf::{Dictionary, Object};
 
 pub(crate) struct Page<'a> {
-    dict: &'a mut Dictionary,
+    dict: &'a Dictionary,
 }
 
 impl<'a> Page<'a> {
-    pub(crate) fn new(dict: &'a mut Dictionary) -> Self {
+    pub(crate) fn new(dict: &'a Dictionary) -> Self {
         Page { dict }
+    }
+
+    pub(crate) fn get_box(&self) -> Result<Vec<i64>> {
+        Ok(self
+            .dict
+            .get(b"MediaBox")?
+            .as_array()?
+            .iter()
+            .map(|n| n.as_i64())
+            .collect::<Result<Vec<_>, _>>()?)
+    }
+}
+
+pub(crate) struct PageMut<'a> {
+    dict: &'a mut Dictionary,
+}
+
+impl<'a> PageMut<'a> {
+    pub(crate) fn new(dict: &'a mut Dictionary) -> Self {
+        PageMut { dict }
     }
 
     pub(crate) fn get_or_create_annots_mut(&mut self) -> Result<&mut Vec<Object>> {
