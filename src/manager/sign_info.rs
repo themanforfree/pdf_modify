@@ -1,10 +1,12 @@
+use chrono::DateTime;
+
 #[derive(Debug, Clone, Default)]
 pub struct SignerInfo {
     pub name: Option<String>,
     pub reason: Option<String>,
     pub contact_info: Option<String>,
     pub location: Option<String>,
-    pub date: Option<String>,
+    pub date: Option<DateTime<chrono::Utc>>,
 }
 
 impl SignerInfo {
@@ -13,7 +15,7 @@ impl SignerInfo {
         reason: impl Into<String>,
         contact_info: impl Into<String>,
         location: impl Into<String>,
-        date: impl Into<String>,
+        date: impl Into<DateTime<chrono::Utc>>,
     ) -> Self {
         SignerInfo {
             name: Some(name.into()),
@@ -45,7 +47,7 @@ pub struct SignerInfoBuilder {
     reason: Option<String>,
     contact_info: Option<String>,
     location: Option<String>,
-    date: Option<String>,
+    date: Option<DateTime<chrono::Utc>>,
 }
 
 impl SignerInfoBuilder {
@@ -69,7 +71,12 @@ impl SignerInfoBuilder {
         self
     }
 
-    pub fn date(mut self, date: impl Into<String>) -> Self {
+    pub fn date_now(mut self) -> Self {
+        self.date = Some(chrono::Utc::now());
+        self
+    }
+
+    pub fn date(mut self, date: impl Into<DateTime<chrono::Utc>>) -> Self {
         self.date = Some(date.into());
         self
     }

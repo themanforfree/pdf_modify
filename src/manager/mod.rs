@@ -46,7 +46,7 @@ impl PDFSignManager {
             Object::Name("**********".into()),
             Object::Name("**********".into()),
         ];
-        let sig_placeholder = vec![b'0'; SIG_CONTENTS_PLACEHOLDER_LEN];
+        let sig_placeholder = vec![0; SIG_CONTENTS_PLACEHOLDER_LEN];
 
         let mut sig_dict = dictionary! {
             "Type" => "Sig",
@@ -71,7 +71,7 @@ impl PDFSignManager {
             sig_dict.set("Location", Object::string_literal(location));
         }
         if let Some(date) = signer_info.date {
-            sig_dict.set("M", Object::string_literal(date));
+            sig_dict.set("M", date);
         }
         self.doc.new_document.add_object(sig_dict)
     }
@@ -216,15 +216,28 @@ impl PDFSignManager {
         let alpha_id = self.doc.new_document.add_object(alpha);
         rgb.dict.set("SMask", alpha_id);
         let img_id = self.doc.new_document.add_object(rgb);
+
+        let bbox = vec![0, 0, SEAL_SIZE.0, SEAL_SIZE.1]
+            .into_iter()
+            .map(Object::Integer)
+            .collect::<Vec<_>>();
+        let matrix = vec![1, 0, 0, 1, 0, 0]
+            .into_iter()
+            .map(Object::Integer)
+            .collect::<Vec<_>>();
+
         let ap_n_dict = dictionary!(
             "Type" => "XObject",
             "Subtype" => "Form",
             "FormType" => 1,
-            "BBox" => vec![0, 0, SEAL_SIZE.0, SEAL_SIZE.1]
-                .into_iter()
-                .map(Object::Integer)
-                .collect::<Vec<_>>(),
-            "Resources" => dictionary! { "XObject" => dictionary! { "Image" => img_id } },
+            "BBox" => bbox,
+            "Matrix" => matrix,
+            "Resources" => dictionary! {
+                "XObject" => dictionary! {
+                    "Im0" => alpha_id,
+                    "Im1" => img_id
+                }
+            },
         );
         let ap_n_content = Content {
             operations: vec![
@@ -240,7 +253,7 @@ impl PDFSignManager {
                         0.into(),
                     ],
                 ),
-                Operation::new("Do", vec!["Image".into()]),
+                Operation::new("Do", vec!["Im1".into()]),
                 Operation::new("Q", vec![]),
             ],
         };
@@ -249,7 +262,6 @@ impl PDFSignManager {
     }
 
     fn add_placeholder(&mut self, page_id: ObjectId, signer_info: SignerInfo) -> Result<()> {
-        self.add_cross_page_seal()?;
         let sig_id = self.add_sig_obj(signer_info);
         let ap_normal_id = self.add_ap_normal()?;
         let sig_annot_id = self.add_sig_annot_obj(ap_normal_id, sig_id, page_id);
@@ -275,6 +287,8 @@ impl PDFSignManager {
     }
 
     pub fn sign(&mut self, signer_info: SignerInfo) -> Result<()> {
+        self.add_cross_page_seal()?;
+
         let page_id = self.clone_sig_page()?;
         self.add_placeholder(page_id, signer_info)?;
 

@@ -5,8 +5,12 @@ edition = "2024"
 default-run = "pdf_modify"
 
 [dependencies]
-anyhow = "1.0.98"
-hex = "0.4.3"
+anyhow = { version = "1.0.98", default-features = false }
+chrono = { version = "0.4.41", default-features = false }
+hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
 image = { version = "0.25.6", default-features = false, features = ["png"] }
-lopdf = "0.34.0"
-openssl = "0.10.72"
+lopdf = { version = "0.34.0", default-features = false, features = [
+    "chrono_time",
+    "nom_parser",
+] }
+openssl = { version = "0.10.72", default-features = false }

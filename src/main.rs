@@ -12,7 +12,7 @@ fn main() -> Result<()> {
         .reason("Signing Document")
         .contact_info("john.doe@example.com")
         .location("New York")
-        .date("2025-05-15")
+        .date_now()
         .build();
     signer.sign(signer_info)?;
     signer.save(output_path)?;
