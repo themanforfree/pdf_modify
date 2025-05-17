@@ -7,6 +7,7 @@ default-run = "pdf_modify"
 [dependencies]
 anyhow = { version = "1.0.98", default-features = false }
 chrono = { version = "0.4.41", default-features = false }
+clap = { version = "4.5.38", features = ["derive"] }
 hex = { version = "0.4.3", default-features = false, features = ["alloc"] }
 image = { version = "0.25.6", default-features = false, features = ["png"] }
 lopdf = { version = "0.34.0", default-features = false, features = [

@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::{io::Write, path::Path};
 
 use anyhow::Result;
 use lopdf::{
@@ -8,11 +8,12 @@ use lopdf::{
 };
 
 use self::image::ImageHelper;
+pub use self::image::ImageRect;
 pub use self::sign_info::SignerInfo;
 use crate::{
-    config::{SEAL_POS, SEAL_SIZE, SIG_CONTENTS_PLACEHOLDER_LEN},
+    config::SIG_CONTENTS_PLACEHOLDER_LEN,
     parser::RawPdf,
-    signer::{P12Signer, Sign},
+    signer::Sign,
     utils::{AcroForm, Page, PageMut},
 };
 
@@ -22,21 +23,15 @@ pub(crate) mod sign_info;
 pub struct PDFSignManager {
     doc: IncrementalDocument,
     raw_pdf: RawPdf,
-    signer: Box<dyn Sign>,
 }
 
 impl PDFSignManager {
-    pub fn load(pdf_path: &str, cert_path: &str) -> Result<Self> {
+    pub fn load(pdf_path: impl AsRef<Path>) -> Result<Self> {
         // Load the PDF document and certificate
         let mut doc = IncrementalDocument::load(pdf_path)?;
         doc.new_document.version = "1.7".into();
-        let signer = Box::new(P12Signer::load(cert_path)?);
         let raw_pdf = RawPdf::empty();
-        Ok(PDFSignManager {
-            doc,
-            raw_pdf,
-            signer,
-        })
+        Ok(PDFSignManager { doc, raw_pdf })
     }
 
     fn add_sig_obj(&mut self, signer_info: SignerInfo) -> ObjectId {
@@ -81,18 +76,22 @@ impl PDFSignManager {
         ap_normal_id: ObjectId,
         sig_id: ObjectId,
         page_id: ObjectId,
+        img: Option<&ImageRect<impl AsRef<Path>>>,
     ) -> ObjectId {
-        let rect = vec![
-            SEAL_POS.0.into(),
-            SEAL_POS.1.into(),
-            (SEAL_POS.0 + SEAL_SIZE.0).into(),
-            (SEAL_POS.1 + SEAL_SIZE.1).into(),
-        ];
+        let rect = match img {
+            Some(i) => vec![
+                i.position.0,
+                i.position.1,
+                (i.position.0 + i.size.0),
+                (i.position.1 + i.size.1),
+            ],
+            None => vec![0, 0, 0, 0],
+        };
         let sig_annot = dictionary! {
             "Type" => "Annot",
             "Subtype" => "Widget",
             "FT" => "Sig",
-            "Rect" => rect,
+            "Rect" => rect.into_iter().map(Object::Integer).collect::<Vec<_>>(),
             "T" => Object::string_literal("Signature1"),
             "V" => sig_id,
             "F" => 4,
@@ -186,10 +185,14 @@ impl PDFSignManager {
         Ok(())
     }
 
-    fn add_cross_page_seal(&mut self) -> Result<()> {
+    pub fn add_cross_page_seal(
+        &mut self,
+        img: impl AsRef<Path>,
+        target_size: (i64, i64),
+    ) -> Result<()> {
         let page_ids: Vec<ObjectId> = self.doc.get_prev_documents().page_iter().collect();
         let page_ids_len = page_ids.len();
-        let mut image_helper = ImageHelper::load_and_split("files/seal.png", page_ids_len)?;
+        let mut image_helper = ImageHelper::load_and_split(img, page_ids_len)?;
 
         for (i, page_id) in page_ids.into_iter().enumerate() {
             let (rgb, alpha) = image_helper.get_img_pair(Some(i))?;
@@ -202,7 +205,10 @@ impl PDFSignManager {
                 .map(|n| n as f32)
                 .collect::<Vec<_>>();
             let height_center = (page_size[1] + page_size[3]) / 2.0;
-            let size = (SEAL_SIZE.0 as f32 / page_ids_len as f32, SEAL_SIZE.1 as f32);
+            let size = (
+                target_size.0 as f32 / page_ids_len as f32,
+                target_size.1 as f32,
+            );
             let pos = (page_size[2] - size.0, height_center - size.1 / 2.0);
 
             self.add_image_to_page(page_id, rgb, alpha, pos, size)?;
@@ -210,17 +216,44 @@ impl PDFSignManager {
         Ok(())
     }
 
-    fn add_ap_normal(&mut self) -> Result<ObjectId> {
-        let mut image_helper = ImageHelper::load("files/seal.png")?;
-        let (mut rgb, alpha) = image_helper.get_img_pair(None)?;
-        let alpha_id = self.doc.new_document.add_object(alpha);
-        rgb.dict.set("SMask", alpha_id);
-        let img_id = self.doc.new_document.add_object(rgb);
+    fn add_ap_normal(&mut self, img: Option<&ImageRect<impl AsRef<Path>>>) -> Result<ObjectId> {
+        let (resources, bbox, ops) = match img {
+            Some(i) => {
+                let mut image_helper = ImageHelper::load(i.path.as_ref())?;
+                let (mut rgb, alpha) = image_helper.get_img_pair(None)?;
+                let alpha_id = self.doc.new_document.add_object(alpha);
+                rgb.dict.set("SMask", alpha_id);
+                let img_id = self.doc.new_document.add_object(rgb);
+                (
+                    dictionary! {
+                        "XObject" => dictionary! {
+                            "Im0" => alpha_id,
+                            "Im1" => img_id
+                        }
+                    },
+                    vec![0, 0, i.size.0, i.size.1],
+                    vec![
+                        Operation::new("q", vec![]),
+                        Operation::new(
+                            "cm",
+                            vec![
+                                i.size.0.into(),
+                                0.into(),
+                                0.into(),
+                                i.size.1.into(),
+                                0.into(),
+                                0.into(),
+                            ],
+                        ),
+                        Operation::new("Do", vec!["Im1".into()]),
+                        Operation::new("Q", vec![]),
+                    ],
+                )
+            }
+            None => (dictionary!(), vec![0, 0, 0, 0], vec![]),
+        };
 
-        let bbox = vec![0, 0, SEAL_SIZE.0, SEAL_SIZE.1]
-            .into_iter()
-            .map(Object::Integer)
-            .collect::<Vec<_>>();
+        let bbox = bbox.into_iter().map(Object::Integer).collect::<Vec<_>>();
         let matrix = vec![1, 0, 0, 1, 0, 0]
             .into_iter()
             .map(Object::Integer)
@@ -232,39 +265,21 @@ impl PDFSignManager {
             "FormType" => 1,
             "BBox" => bbox,
             "Matrix" => matrix,
-            "Resources" => dictionary! {
-                "XObject" => dictionary! {
-                    "Im0" => alpha_id,
-                    "Im1" => img_id
-                }
-            },
+            "Resources" => resources,
         );
-        let ap_n_content = Content {
-            operations: vec![
-                Operation::new("q", vec![]),
-                Operation::new(
-                    "cm",
-                    vec![
-                        SEAL_SIZE.0.into(),
-                        0.into(),
-                        0.into(),
-                        SEAL_SIZE.1.into(),
-                        0.into(),
-                        0.into(),
-                    ],
-                ),
-                Operation::new("Do", vec!["Im1".into()]),
-                Operation::new("Q", vec![]),
-            ],
-        };
-        let ap_n_stream = Stream::new(ap_n_dict, ap_n_content.encode()?);
+        let ap_n_stream = Stream::new(ap_n_dict, Content { operations: ops }.encode()?);
         Ok(self.doc.new_document.add_object(ap_n_stream))
     }
 
-    fn add_placeholder(&mut self, page_id: ObjectId, signer_info: SignerInfo) -> Result<()> {
+    fn add_placeholder(
+        &mut self,
+        page_id: ObjectId,
+        signer_info: SignerInfo,
+        img: Option<ImageRect<impl AsRef<Path>>>,
+    ) -> Result<()> {
         let sig_id = self.add_sig_obj(signer_info);
-        let ap_normal_id = self.add_ap_normal()?;
-        let sig_annot_id = self.add_sig_annot_obj(ap_normal_id, sig_id, page_id);
+        let ap_normal_id = self.add_ap_normal(img.as_ref())?;
+        let sig_annot_id = self.add_sig_annot_obj(ap_normal_id, sig_id, page_id, img.as_ref());
         let mut page = self.get_page_mut(page_id)?;
         let annots = page.get_or_create_annots_mut()?;
         annots.push(sig_annot_id.into());
@@ -286,17 +301,20 @@ impl PDFSignManager {
         Ok(page_id)
     }
 
-    pub fn sign(&mut self, signer_info: SignerInfo) -> Result<()> {
-        self.add_cross_page_seal()?;
-
+    pub fn sign(
+        &mut self,
+        signer_info: SignerInfo,
+        img: Option<ImageRect<impl AsRef<Path>>>,
+        signer: &dyn Sign,
+    ) -> Result<()> {
         let page_id = self.clone_sig_page()?;
-        self.add_placeholder(page_id, signer_info)?;
+        self.add_placeholder(page_id, signer_info, img)?;
 
         let mut buffer = Vec::new();
         self.doc.save_to(&mut buffer)?;
         self.raw_pdf.load_data(buffer)?;
 
-        self.raw_pdf.sign(self.signer.as_ref())?;
+        self.raw_pdf.sign(signer)?;
 
         Ok(())
     }
@@ -312,7 +330,7 @@ impl PDFSignManager {
     }
 
     #[inline]
-    pub fn save(&mut self, path: &str) -> Result<()> {
+    pub fn save<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         let mut file = std::fs::File::create(path)?;
         self.save_to(&mut file)?;
         Ok(())

@@ -123,3 +123,19 @@ impl Divider {
         Some((start as u32, width as u32))
     }
 }
+
+pub struct ImageRect<P> {
+    pub path: P,
+    pub position: (i64, i64),
+    pub size: (i64, i64),
+}
+
+impl<P: AsRef<Path>> ImageRect<P> {
+    pub fn new(path: P, position: (i64, i64), size: (i64, i64)) -> Self {
+        Self {
+            path,
+            position,
+            size,
+        }
+    }
+}
